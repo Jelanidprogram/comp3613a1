@@ -47,13 +47,18 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 
 def cmd_seed(args: argparse.Namespace) -> None:
-    """Insert demo users.
+    """Insert demo users and demo internship data.
 
     bob / bobpass       (regular_user)
     admin / adminpass   (admin)
     """
+    from sqlmodel import select
+
     from app.database import ensure_db_and_tables, get_cli_session
+    from app.models.internship import Company, Department, InternshipPosting
+    from app.repositories.internship import InternshipRepository
     from app.repositories.user import UserRepository
+    from app.schemas.internship import InternshipPostingCreate
     from app.schemas.user import AdminCreate, RegularUserCreate
     from app.utilities.security import encrypt_password
 
@@ -65,17 +70,80 @@ def cmd_seed(args: argparse.Namespace) -> None:
         ("admin", "admin@example.com", "adminpass", "admin"),
     ]
 
+    demo_postings = [
+        (
+            "Software Engineering Internship",
+            "TechNova Solutions",
+            "Engineering",
+            "Build and ship features for our customer-facing platform.",
+        ),
+        (
+            "Data Analytics Internship",
+            "InsightEdge Corp",
+            "Analytics",
+            "Turn raw data into dashboards and recommendations.",
+        ),
+        (
+            "Product Management Internship",
+            "ClearPath Products",
+            "Product",
+            "Own the roadmap from discovery to launch.",
+        ),
+        (
+            "UX/UI Design Internship",
+            "NeonWave Studio",
+            "Design",
+            "Create intuitive user interfaces and experiences.",
+        ),
+        (
+            "Cybersecurity Internship",
+            "FortressNet Systems",
+            "Security",
+            "Help protect systems from threats and vulnerabilities.",
+        ),
+        (
+            "DevOps Internship",
+            "CloudPulse Technologies",
+            "Infrastructure",
+            "Automate deployment and monitor cloud infrastructure.",
+        ),
+        (
+            "Mobile Development Internship",
+            "AppForge Labs",
+            "Engineering",
+            "Build native and cross-platform mobile applications.",
+        ),
+        (
+            "Marketing Internship",
+            "BrandSpark Agency",
+            "Marketing",
+            "Support campaigns and brand strategy initiatives.",
+        ),
+        (
+            "Finance Internship",
+            "Apex Capital Partners",
+            "Finance",
+            "Assist with financial analysis and reporting.",
+        ),
+        (
+            "Human Resources Internship",
+            "PeopleFirst Solutions",
+            "Human Resources",
+            "Support recruitment and employee onboarding.",
+        ),
+    ]
+
     created = 0
     skipped = 0
     with get_cli_session() as session:
-        repo = UserRepository(session)
+        user_repo = UserRepository(session)
         for username, email, password, role in demo_users:
-            if repo.get_by_username(username):
+            if user_repo.get_by_username(username):
                 print(f"  skip  {username} (already exists)")
                 skipped += 1
                 continue
             payload_cls = AdminCreate if role == "admin" else RegularUserCreate
-            repo.create(
+            user_repo.create(
                 payload_cls(
                     username=username,
                     email=email,
@@ -84,6 +152,53 @@ def cmd_seed(args: argparse.Namespace) -> None:
                 )
             )
             print(f"  create {username} ({role})")
+            created += 1
+
+        # Demo internship data so students have postings to apply to.
+        internship_repo = InternshipRepository(session)
+        for title, company_name, dept_name, description in demo_postings:
+            existing = session.exec(
+                select(InternshipPosting).where(InternshipPosting.title == title)
+            ).first()
+            if existing:
+                print(f"  skip  posting '{title}' (already exists)")
+                skipped += 1
+                continue
+            company_row = session.exec(
+                select(Company).where(Company.name == company_name)
+            ).first()
+            if company_row is None:
+                company_row = Company(
+                    name=company_name, description=f"{company_name} demo company"
+                )
+                session.add(company_row)
+                session.commit()
+                session.refresh(company_row)
+            dept_row = session.exec(
+                select(Department).where(
+                    Department.name == dept_name,
+                    Department.company_id == company_row.company_id,
+                )
+            ).first()
+            if dept_row is None:
+                dept_row = Department(
+                    name=dept_name,
+                    company_id=company_row.company_id,
+                    description=f"{dept_name} department",
+                )
+                session.add(dept_row)
+                session.commit()
+                session.refresh(dept_row)
+            internship_repo.create_posting(
+                InternshipPostingCreate(
+                    title=title,
+                    company_id=company_row.company_id,
+                    department_id=dept_row.department_id,
+                    description=description,
+                    is_active=True,
+                )
+            )
+            print(f"  create posting '{title}'")
             created += 1
 
     print(f"Seed done — created {created}, skipped {skipped}.")

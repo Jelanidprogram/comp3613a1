@@ -53,3 +53,13 @@ async def is_admin_dep(user: AuthDep):
     return user
 
 AdminDep = Annotated[User, Depends(is_admin_dep)]
+
+async def get_optional_user(request: Request, db: SessionDep) -> User | None:
+    """Return the current user, or None if not authenticated."""
+    try:
+        return await get_current_user(request, db)
+    except Exception:
+        return None
+
+
+OptionalUserDep = Annotated[User | None, Depends(get_optional_user)]
